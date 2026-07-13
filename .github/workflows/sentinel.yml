@@ -1,0 +1,53 @@
+name: external-uptime-sentinel
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: "Force a failure to test the alert path"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe public endpoints from GitHub's vantage
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_EXTERNAL_TOPIC }}
+          SIMULATE: ${{ inputs.simulate_failure }}
+        run: |
+          set -u
+          failures=""
+          check() {
+            local name="$1" url="$2" want="$3"
+            local code
+            for attempt in 1 2 3; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 "$url" || echo 000)
+              case ",$want," in *",$code,"*) echo "OK  $name ($code)"; return 0;; esac
+              sleep 10
+            done
+            echo "FAIL $name (last: $code)"
+            failures="${failures}${name} (HTTP ${code}); "
+          }
+          check "public site"  "https://schultzsolutions.tech"                 "200,301,302"
+          check "ntfy public"  "https://ntfy.schultzsolutions.tech/v1/health"  "200"
+          if [ "${SIMULATE}" = "true" ]; then
+            failures="${failures}simulated failure (alert-path test); "
+          fi
+          if [ -n "$failures" ]; then
+            echo "Alerting via ntfy.sh: $failures"
+            curl -s -m 15 \
+              -H "Title: Homelab unreachable from the internet" \
+              -H "Priority: urgent" \
+              -H "Tags: rotating_light" \
+              -d "External sentinel (GitHub Actions) cannot reach: ${failures}Checked $(date -u '+%Y-%m-%d %H:%M UTC'). LAN/WireGuard may still work — this is the public path." \
+              "https://ntfy.sh/${NTFY_TOPIC}" > /dev/null
+            exit 1
+          fi
+          echo "All public endpoints reachable."
