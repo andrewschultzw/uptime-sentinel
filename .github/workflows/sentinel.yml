@@ -16,7 +16,13 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write   # self-keepalive: re-enable resets GitHub's 60-day inactivity disable
     steps:
+      - name: Keepalive — reset the 60-day scheduled-workflow disable timer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sentinel.yml/enable"
       - name: Probe public endpoints from GitHub's vantage
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_EXTERNAL_TOPIC }}
